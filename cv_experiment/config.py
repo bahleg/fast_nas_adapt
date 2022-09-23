@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from typing_extensions import Literal
 
 
 @dataclass
@@ -8,7 +7,7 @@ class ExpConfig:
     num_classes: int = 10
 
     # trainer config
-    strategy: Literal['aggressive', 'layer-wise', 'proposed'] = 'proposed'
+    strategy: str = 'proposed'  # aggressive, layer-wise, infomax, proposed, last-layer
     batch_size: int = 32
     num_epochs: int = 20
     log_dir: str = 'results/proposed'
