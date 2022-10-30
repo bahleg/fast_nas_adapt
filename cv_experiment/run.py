@@ -9,11 +9,12 @@ if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_arguments(ExpConfig(), dest='config')
     args = parser.parse_args()
-    config = args.config
+    config: ExpConfig = args.config
     print(config)
 
-    model = ResNet18(num_classes=config.num_classes)
-    train_dl, test_dl = get_dataloaders(batch_size=config.batch_size, img_size=config.img_size)
+    model = ResNet18(num_classes=len(config.classes))
+    train_dl, test_dl = get_dataloaders(classes=config.classes, batch_size=config.batch_size,
+                                        img_size=config.img_size)
 
     trainer = Trainer(model, config, train_loader=train_dl, valid_loader=test_dl)
     trainer.fit(config.num_epochs)

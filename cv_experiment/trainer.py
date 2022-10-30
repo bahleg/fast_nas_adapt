@@ -44,11 +44,15 @@ class Trainer:
 
         # TODO: check state dict of the optimizers
         self.layer_wise_opt = {}
+        self.layer_wise_sch = {}
         for layer in self.model.model._modules:
             params = list(getattr(self.model.model, layer).parameters())
             if len(params) > 0:
                 self.layer_wise_opt[layer] = torch.optim.SGD(params,
-                                                             lr=self.config.lr, momentum=self.config.momentum)
+                                                             lr=self.config.lr, momentum=self.config.momentum,
+                                                             weight_decay=self.config.weight_decay)
+                self.layer_wise_sch[layer] = torch.optim.lr_scheduler.CosineAnnealingLR(
+                    self.layer_wise_opt[layer], T_max=self.config.num_epochs)
 
         aux_input = torch.randn(1, 3, self.config.img_size, self.config.img_size).to(self.config.device)
         with torch.no_grad():
@@ -60,14 +64,14 @@ class Trainer:
         for i, layer in enumerate(interm_repr):
             if layer == 'fc':
                 self.variational_modules_infomax.update({
-                    'fc': IdTransform(), # nn.Linear(self.config.num_classes, self.config.num_classes).to(self.config.device)
+                    'fc': IdTransform(),
                 })
             else:
                 hidden_size = interm_repr[layer].size(1)
                 self.variational_modules_infomax.update({
                     layer: nn.Sequential(nn.AdaptiveAvgPool2d((8, 8)),
                                          nn.Flatten(),
-                                         nn.Linear(hidden_size * 8**2, self.config.num_classes)).to(self.config.device)})
+                                         nn.Linear(hidden_size * 8**2, len(self.config.classes))).to(self.config.device)})
 
             self.variational_opt_infomax[layer] = torch.optim.SGD(self.variational_modules_infomax[layer].parameters(),
                                                                  lr=self.config.lr, momentum=self.config.momentum)
@@ -106,7 +110,7 @@ class Trainer:
         })
         # p(y|v_last)
         self.variational_modules_proposed.update({
-            'fc': nn.Sequential(nn.Flatten(), nn.Linear(512, self.config.num_classes))
+            'fc': nn.Sequential(nn.Flatten(), nn.Linear(512, len(self.config.classes)))
         })
         # optimizers
         for layer in self.variational_modules_proposed:
@@ -126,6 +130,8 @@ class Trainer:
             self.layer_wise_opt[layer].zero_grad()
         for layer in self.variational_opt_infomax:
             self.variational_opt_infomax[layer].zero_grad()
+        for layer in self.variational_opt_proposed:
+            self.variational_opt_proposed[layer].zero_grad()
         x = batch['x']
         y = batch['y']
         logits, selected_out = self.model(x)
@@ -135,6 +141,7 @@ class Trainer:
             loss.backward()
             for layer in self.layer_wise_opt:
                 self.layer_wise_opt[layer].step()
+                self.layer_wise_sch[layer].step()
         elif self.config.strategy == 'last-layer':
             loss = self.loss_fn(logits, y)
             loss.backward()
