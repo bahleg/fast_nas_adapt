@@ -6,6 +6,7 @@ from typing import List
 
 
 def get_dataloaders(classes: List[int], batch_size: int = 16, img_size: int = 33):
+    classes_to_ids = {cls : i for i, cls in enumerate(classes)}
     transform_train = transforms.Compose([
         transforms.RandomCrop(img_size, padding=4),
         transforms.RandomHorizontalFlip(),
@@ -18,13 +19,13 @@ def get_dataloaders(classes: List[int], batch_size: int = 16, img_size: int = 33
     ])
     trainset = torchvision.datasets.CIFAR10(root='./data', train=True,
                                             download=True, transform=transform_train)
-    trainset = [(x, y) for x, y in trainset if y in classes]
+    trainset = [(x, classes_to_ids[y]) for x, y in trainset if y in classes]
     trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size,
                                               shuffle=True, num_workers=2)
 
     testset = torchvision.datasets.CIFAR10(root='./data', train=False,
                                            download=True, transform=transform_test)
-    testset = [(x, y) for x, y in testset if y in classes]
+    testset = [(x, classes_to_ids[y]) for x, y in testset if y in classes]
     testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size,
                                              shuffle=False, num_workers=2)
     return trainloader, testloader

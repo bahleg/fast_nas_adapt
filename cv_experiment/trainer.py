@@ -121,6 +121,7 @@ class Trainer:
         
         # TODO: add sigma^2 for each layer
         self.mse_loss = nn.MSELoss()
+        self.mse_weight = torch.tensor(self.config.mse_weight).to(self.config.device)
 
         self._global_step = 0
 
@@ -171,9 +172,10 @@ class Trainer:
             else:
                 var_logits = self.variational_modules_proposed[next_layer](selected_out[cur_layer])
             if next_layer == 'fc':
-                loss = self.loss_fn(var_logits, batch['y']) + self.mse_loss(var_logits, selected_out['fc'])
+                loss = self.loss_fn(var_logits, batch['y']) + \
+                    self.mse_loss(var_logits, selected_out['fc']) * self.mse_weight
             else:
-                loss = self.mse_loss(var_logits, selected_out[next_layer])
+                loss = self.mse_loss(var_logits, selected_out[next_layer]) * self.mse_weight
             loss.backward()
             if next_layer in self.variational_opt_proposed:
                 self.variational_opt_proposed[next_layer].step()
@@ -204,14 +206,14 @@ class Trainer:
         }
 
     def train_one_epoch(self):
-        for i, (x, y) in tqdm(enumerate(self.train_loader), total=len(self.train_loader), desc='Train:'):
+        for i, (x, y) in tqdm(enumerate(self.train_loader), total=len(self.train_loader), desc='Train', leave=False):
             self.training_step({'x': x.to(self.config.device), 'y': y.to(self.config.device)})
             self._global_step += 1
 
     def validate(self):
         self.metric.reset()
         losses = []
-        for i, (x, y) in tqdm(enumerate(self.valid_loader), total=len(self.valid_loader), desc='Valid:'):
+        for i, (x, y) in tqdm(enumerate(self.valid_loader), total=len(self.valid_loader), desc='Valid', leave=False):
             out = self.validation_step({'x': x.to(self.config.device), 'y': y.to(self.config.device)})
             losses.append(out['loss'])
         self.writer.add_scalar('Valid/acc_epoch', self.metric.compute().item(), self._global_step)
