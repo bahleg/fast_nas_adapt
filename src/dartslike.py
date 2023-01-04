@@ -29,8 +29,8 @@ class MILoss(torch.nn.Module):
             mean = self.aux.means_int[current_layer_name](to_transform)
             log_sigma = self.aux.lsigmas_int[current_layer_name]
             loss += (log_sigma * np.prod(mean.shape) + \
-                ((mean - intermediate[next_layer_name].view(intermediate[next_layer_name].shape[0], -1))**2).sum()
-                / (2 * torch.exp(log_sigma) ** 2)) \
+                (((mean - intermediate[next_layer_name].view(intermediate[next_layer_name].shape[0], -1))**2)
+                / (2 * torch.exp(log_sigma) ** 2))).sum() \
                     * (1.0-self.MI_Y_lambda)
         
         target = one_hot(target, self.num_classes)
@@ -47,7 +47,7 @@ class MILoss(torch.nn.Module):
                 log_sigma = self.aux.lsigmas_y[current_layer_name]
             
             loss += (log_sigma * np.prod(mean.shape) + \
-                ((mean - target)**2).sum() / (2 * torch.exp(log_sigma) ** 2))  \
+                (((mean - target)**2) / (2 * torch.exp(log_sigma) ** 2))).sum()  \
                     * (self.MI_Y_lambda)
            
         return loss 
@@ -78,7 +78,7 @@ class DartsLikeTrainer:
             raise NotImplementedError("unrolled")
 
         history = []
-        acc = Accuracy(task='multiclass', num_classes=2)  # TODO: increase num classes if necessary
+        acc = Accuracy(task='multiclass', num_classes=2, top_k=1)  # TODO: increase num classes if necessary
         if self.parameter_optimization == 'CE':
             criterion = torch.nn.CrossEntropyLoss()
             crit = lambda out, int, targ: criterion(out, targ)
