@@ -45,10 +45,11 @@ class MILoss(torch.nn.Module):
             else:
                 mean = self.aux.means_y[current_layer_name](to_transform)
                 log_sigma = self.aux.lsigmas_y[current_layer_name]
+            log_sigma = log_sigma.detach().view(1)  # detach sigma
             
-            loss += (log_sigma * np.prod(mean.shape) + \
-                (((mean - target)**2) / (2 * torch.exp(log_sigma) ** 2))).sum()  \
-                    * (self.MI_Y_lambda)
+            loss += (log_sigma * mean.numel()).sum()
+            loss += (((mean - target) ** 2).sum() / (2 * torch.exp(log_sigma) ** 2)).sum()
+            loss *= self.MI_Y_lambda
            
         return loss 
 
