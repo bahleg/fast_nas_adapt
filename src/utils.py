@@ -5,7 +5,7 @@ import torch
 from torchmetrics import Accuracy
 
 def test_loop(model, testdata, device):
-    acc = Accuracy(task='multiclass', num_classes=2)  # TODO: adjust num_classes
+    acc = Accuracy(task='multiclass', num_classes=2, top_k=1)  # TODO: adjust num_classes
     model.eval()
     for x,y in tqdm.tqdm_notebook(testdata):
         x = x.to(device)
