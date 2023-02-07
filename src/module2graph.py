@@ -12,7 +12,9 @@ class GraphInterperterSimple:
     """
 
     def __init__(self, mod):
-        if isinstance(mod, torch.nn.Module):
+        try:
+            mod.graph
+        except:
             mod = torch.fx.symbolic_trace(mod)
         self.mod = mod
         self.graph = mod.graph
@@ -62,7 +64,9 @@ class GraphInterperterWithGamma(torch.nn.Module):
     """
     def __init__(self, mod):
         super(GraphInterperterWithGamma, self).__init__()
-        if isinstance(mod, torch.nn.Module):
+        try:
+            mod.graph
+        except:
             mod = torch.fx.symbolic_trace(mod)
         self.mod = mod
         self.graph = mod.graph
