@@ -7,20 +7,29 @@ from torch.nn.functional import one_hot
 
 
 class MILoss(torch.nn.Module):
-    def __init__(self, aux, MI_Y_lambda = 0.0, num_classes=2) -> None:
+    def __init__(self, aux, MI_Y_lambda = 0.0, num_classes=2, layer_wise: bool = False) -> None:
         super().__init__()
         self.aux = aux 
         self.MI_Y_lambda = MI_Y_lambda
         self.num_classes = num_classes
+        self.layer_wise = layer_wise  # switch to layer wise optimization
         
     def forward(self, out, intermediate, target):
         ### intermediate 
         layers = list(self.aux.layer_names)
         loss = 0.0
+        if self.layer_wise:
+            selected_layer_ids = [np.random.randint(len(layers))]
+        else:
+            selected_layer_ids = range(len(layers))
         for i in range(len(layers)-1):
+            if i not in selected_layer_ids:
+                continue
             current_layer_name = layers[i]
             next_layer_name = layers[i+1]
             to_transform =  intermediate[current_layer_name].view(intermediate[current_layer_name].shape[0], -1)
+            if self.layer_wise:
+                to_transform = to_transform.detach()
             #print (current_layer_name, next_layer_name,to_transform.shape)
             #try:
             #    print (self.aux.means_int.weight.shape)
@@ -37,8 +46,12 @@ class MILoss(torch.nn.Module):
          
         
         for i in range(len(layers)):
+            if i not in selected_layer_ids:
+                continue
             current_layer_name = layers[i]
             to_transform =  intermediate[current_layer_name].view(intermediate[current_layer_name].shape[0], -1)
+            if self.layer_wise and i != len(layers) - 1:
+                to_transform = to_transform.detach()
             if i == len(layers)-1:
                 mean = to_transform 
                 log_sigma = torch.zeros(1)
@@ -55,13 +68,15 @@ class MILoss(torch.nn.Module):
 
 
 class DartsLikeTrainer:
-    def __init__(self, graph_model, unrolled=False, parameter_optimization='CE', gamma_optimization='CE', aux=None, MI_Y_lambda = 0.0) -> None:
+    def __init__(self, graph_model, unrolled=False, parameter_optimization='CE', gamma_optimization='CE',
+                 aux=None, MI_Y_lambda = 0.0, layer_wise: bool = False) -> None:
         self.graph_model = graph_model
         self.unrolled = unrolled
         self.parameter_optimization = parameter_optimization
         self.gamma_optimization = gamma_optimization
         self.aux = aux 
         self.MI_Y_LAMBDA = MI_Y_lambda
+        self.layer_wise = layer_wise
         
 
     def train_loop(self, traindata,  valdata, testdata, sample_mod, epoch_num, lr, lr2, device, wd):
@@ -84,7 +99,7 @@ class DartsLikeTrainer:
             criterion = torch.nn.CrossEntropyLoss()
             crit = lambda out, int, targ: criterion(out, targ)
         elif self.parameter_optimization == 'MI':
-            crit = MILoss(self.aux, self.MI_Y_LAMBDA)
+            crit = MILoss(self.aux, self.MI_Y_LAMBDA, layer_wise=self.layer_wise)
         else:
             raise NotImplementedError(
                 f"parameter optimization: {self.parameter_optimization}")
@@ -94,7 +109,7 @@ class DartsLikeTrainer:
             crit2 = lambda out, int, targ: criterion2(out, targ)
 
         elif self.gamma_optimization == 'MI':
-            crit2 = MILoss(self.aux, self.MI_Y_LAMBDA)
+            crit2 = MILoss(self.aux, self.MI_Y_LAMBDA, layer_wise=self.layer_wise)
         else:
             raise NotImplementedError(
                 f"gamma optimization: {self.gamma_optimization}")
