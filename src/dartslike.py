@@ -54,7 +54,7 @@ class MILoss(torch.nn.Module):
                 to_transform = to_transform.detach()
             if i == len(layers)-1:
                 mean = to_transform 
-                log_sigma = torch.zeros(1)
+                log_sigma = torch.zeros(1).to(to_transform.device)
             else:
                 mean = self.aux.means_y[current_layer_name](to_transform)
                 log_sigma = self.aux.lsigmas_y[current_layer_name]
