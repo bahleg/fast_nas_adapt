@@ -94,7 +94,7 @@ class DartsLikeTrainer:
             raise NotImplementedError("unrolled")
 
         history = []
-        acc = Accuracy(task='multiclass', num_classes=2, top_k=1)  # TODO: increase num classes if necessary
+        acc = Accuracy(task='multiclass', num_classes=2, top_k=1).to(device)  # TODO: increase num classes if necessary
         if self.parameter_optimization == 'CE':
             criterion = torch.nn.CrossEntropyLoss()
             crit = lambda out, int, targ: criterion(out, targ)

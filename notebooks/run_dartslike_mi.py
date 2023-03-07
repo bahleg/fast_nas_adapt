@@ -105,4 +105,4 @@ if __name__=='__main__':
     history = dl.train_loop(trainloader, valloader, testloader, batch_seen, epoch_num, lr, lr, device, wd)
 
     with open(name+'.pckl','wb') as out:
-        out.write(pickle.dumps( (history, model.state_dict())))
+        out.write(pickle.dumps( (history, model.cpu().state_dict())))

@@ -31,7 +31,7 @@ def safe_prune(model, trainloader, num_to_prune, gammas_to_prune):
     while num < num_to_prune and i < len(gammas_to_prune):
         model.gammas[i] = 0.0
   
-        if abs(model(x) - model(torch.zeros(x.shape))).sum() < 1e-5:
+        if torch.abs(model(x) - model(torch.zeros_like(x))).sum() < 1e-5:
             model.gammas[i] = 1.0
             i += 1
         else:
@@ -70,7 +70,7 @@ if __name__=='__main__':
     model.eval()
     model.gammas.requires_grad = False 
     model.discrete = True
-    argsort_gammas = np.argsort(model.gammas.data.numpy())
+    argsort_gammas = np.argsort(model.gammas.data.cpu().numpy())
     results = []
     print(f'Gammas: {len(model.gammas)}')
 
@@ -96,5 +96,5 @@ if __name__=='__main__':
             break
 
     with open(name+'tuned.pckl','wb') as out:
-        out.write(pickle.dumps( (results, model.state_dict())))
+        out.write(pickle.dumps( (results, model.cpu().state_dict())))
 
