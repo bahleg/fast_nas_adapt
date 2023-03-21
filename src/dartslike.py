@@ -80,8 +80,12 @@ class DartsLikeTrainer:
         
 
     def train_loop(self, traindata,  valdata, testdata, sample_mod, epoch_num, lr, lr2, device, wd):
-        gammas =  [self.graph_model.gammas]
-        parameters =  [p for n,p in self.graph_model.named_parameters() if n !='gammas']
+        if isinstance(self.graph_model.gammas, list):
+            gammas = self.graph_model.gammas 
+            parameters = [p for n, p in self.graph_model.named_parameters() if 'gamma' not in n]
+        else:
+            gammas =  [self.graph_model.gammas]
+            parameters =  [p for n,p in self.graph_model.named_parameters() if n !='gammas']
         if self.gamma_optimization == 'MI':
             gammas.extend(list(self.aux.parameters()))
         if self.parameter_optimization == 'MI':
@@ -123,7 +127,12 @@ class DartsLikeTrainer:
                 optim.zero_grad()
                 x = x.to(device)
                 y = y.to(device)
-                out, intermediate = self.graph_model(x, intermediate=True)
+                try:
+                    out, intermediate = self.graph_model(x, intermediate=True)
+                except:
+                    out = self.graph_model(x)
+                    intermediate = self.graph_model.intermediate
+
                 loss = crit(out, intermediate, y)
                 loss.backward()
                 optim.step()
@@ -133,8 +142,12 @@ class DartsLikeTrainer:
                 x2 = x2.to(device)
                 y2 = y2.to(device)
                 optim2.zero_grad()
-                out, intermediate = self.graph_model(x2, intermediate=True)
-               
+                try:
+                    out, intermediate = self.graph_model(x2, intermediate=True)
+                except:
+                    out = self.graph_model(x)
+                    intermediate = self.graph_model.intermediate
+                    
                 loss2 = crit2(out, intermediate, y2)
                 loss2.backward()
                 optim2.step()

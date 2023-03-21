@@ -94,7 +94,7 @@ class GraphInterperterWithGamma(torch.nn.Module):
         args_iter = iter(args)
         env : Dict[str, Node] = {}
 
-        def load_arg(a):
+        def load_arg(a):    
             return torch.fx.graph.map_arg(a, lambda n: env[n.name])
 
         def fetch_attr(target : str):
