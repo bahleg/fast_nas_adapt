@@ -4,6 +4,7 @@ import torch
 from torchmetrics import Accuracy
 import tqdm
 from torch.nn.functional import one_hot
+from copy import deepcopy
 
 
 class MILoss(torch.nn.Module):
@@ -67,6 +68,31 @@ class MILoss(torch.nn.Module):
         return loss 
 
 
+class CELoss(torch.nn.Module):
+    def __init__(self, aux: object, layer_wise: bool = False) -> None:
+        super().__init__()
+        self.aux = aux
+        self.layer_wise = layer_wise
+        self.loss_fn = torch.nn.CrossEntropyLoss()
+        if self.layer_wise:
+            self.linears = deepcopy(aux.means_y)
+    
+    def forward(self, out, intermediate, target):
+        if not self.layer_wise:
+            return self.loss_fn(out, target)
+        layers = list(self.aux.layer_names)
+        selected_layer_idx = np.random.randint(len(layers))
+        current_layer_name = layers[selected_layer_idx]
+        to_transform =  intermediate[current_layer_name].view(intermediate[current_layer_name].shape[0], -1)
+        if selected_layer_idx != len(layers) - 1:
+            to_transform = to_transform.detach()
+        if selected_layer_idx == len(layers) - 1:
+            mean = to_transform 
+        else:
+            mean = self.linears[current_layer_name](to_transform)
+        return self.loss_fn(mean, target) 
+
+
 class DartsLikeTrainer:
     def __init__(self, graph_model, unrolled=False, parameter_optimization='CE', gamma_optimization='CE',
                  aux=None, MI_Y_lambda = 0.0, layer_wise: bool = False) -> None:
@@ -79,7 +105,7 @@ class DartsLikeTrainer:
         self.layer_wise = layer_wise
         
 
-    def train_loop(self, traindata,  valdata, testdata, sample_mod, epoch_num, lr, lr2, device, wd, model, intermediate_getter = None):
+    def train_loop(self, traindata,  valdata, testdata, sample_mod, epoch_num, lr, lr2, device, wd, intermediate_getter = None):
         if isinstance(self.graph_model.gammas, list):
             gammas = self.graph_model.gammas[:] 
             parameters = [p for n, p in self.graph_model.named_parameters() if 'gamma' not in n]
@@ -100,8 +126,7 @@ class DartsLikeTrainer:
         history = []
         acc = Accuracy(task='multiclass', num_classes=2, top_k=1).to(device)  # TODO: increase num classes if necessary
         if self.parameter_optimization == 'CE':
-            criterion = torch.nn.CrossEntropyLoss()
-            crit = lambda out, int, targ: criterion(out, targ)
+            crit = CELoss(self.aux, self.layer_wise)
         elif self.parameter_optimization == 'MI':
             crit = MILoss(self.aux, self.MI_Y_LAMBDA, layer_wise=self.layer_wise)
         else:
