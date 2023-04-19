@@ -127,7 +127,7 @@ class DartsLikeTrainer:
                 optim.zero_grad()
                 x = x.to(device)
                 y = y.to(device)
-                if intermediate_getter is None
+                if intermediate_getter is None:
                     try:
                         out, intermediate = self.graph_model(x, intermediate=True)
                     except:
