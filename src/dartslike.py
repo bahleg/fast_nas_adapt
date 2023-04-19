@@ -81,7 +81,7 @@ class DartsLikeTrainer:
 
     def train_loop(self, traindata,  valdata, testdata, sample_mod, epoch_num, lr, lr2, device, wd, model, intermediate_getter = None):
         if isinstance(self.graph_model.gammas, list):
-            gammas = self.graph_model.gammas 
+            gammas = self.graph_model.gammas[:] 
             parameters = [p for n, p in self.graph_model.named_parameters() if 'gamma' not in n]
         else:
             gammas =  [self.graph_model.gammas]
