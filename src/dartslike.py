@@ -79,7 +79,7 @@ class DartsLikeTrainer:
         self.layer_wise = layer_wise
         
 
-    def train_loop(self, traindata,  valdata, testdata, sample_mod, epoch_num, lr, lr2, device, wd):
+    def train_loop(self, traindata,  valdata, testdata, sample_mod, epoch_num, lr, lr2, device, wd, model, intermediate_getter = None):
         if isinstance(self.graph_model.gammas, list):
             gammas = self.graph_model.gammas 
             parameters = [p for n, p in self.graph_model.named_parameters() if 'gamma' not in n]
@@ -127,11 +127,14 @@ class DartsLikeTrainer:
                 optim.zero_grad()
                 x = x.to(device)
                 y = y.to(device)
-                try:
-                    out, intermediate = self.graph_model(x, intermediate=True)
-                except:
-                    out = self.graph_model(x)
-                    intermediate = self.graph_model.intermediate
+                if intermediate_getter is None
+                    try:
+                        out, intermediate = self.graph_model(x, intermediate=True)
+                    except:
+                        out = self.graph_model(x)
+                        intermediate = self.graph_model.intermediate
+                else:
+                    out, intermediate = intermediate_getter(x)
 
                 loss = crit(out, intermediate, y)
                 loss.backward()
@@ -142,11 +145,14 @@ class DartsLikeTrainer:
                 x2 = x2.to(device)
                 y2 = y2.to(device)
                 optim2.zero_grad()
-                try:
-                    out, intermediate = self.graph_model(x2, intermediate=True)
-                except:
-                    out = self.graph_model(x)
-                    intermediate = self.graph_model.intermediate
+                if intermediate_getter is None:
+                    try:
+                        out, intermediate = self.graph_model(x2, intermediate=True)
+                    except:
+                        out = self.graph_model(x)
+                        intermediate = self.graph_model.intermediate
+                else:
+                    out, intermediate = intermediate_getter(x2)
                     
                 loss2 = crit2(out, intermediate, y2)
                 loss2.backward()
