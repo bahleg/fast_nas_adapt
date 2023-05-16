@@ -67,11 +67,10 @@ class MILoss(torch.nn.Module):
            
         return loss 
 
-
 class CELoss(torch.nn.Module):
     def __init__(self, aux: object, layer_wise: bool = False) -> None:
         super().__init__()
-        self.aux = aux
+        self.layers = len(list(aux.layer_names))
         self.layer_wise = layer_wise
         self.loss_fn = torch.nn.CrossEntropyLoss()
         if self.layer_wise:
@@ -80,16 +79,11 @@ class CELoss(torch.nn.Module):
     def forward(self, out, intermediate, target):
         if not self.layer_wise:
             return self.loss_fn(out, target)
-        layers = list(self.aux.layer_names)
-        selected_layer_idx = np.random.randint(len(layers))
-        current_layer_name = layers[selected_layer_idx]
-        to_transform =  intermediate[current_layer_name].view(intermediate[current_layer_name].shape[0], -1)
-        if selected_layer_idx != len(layers) - 1:
-            to_transform = to_transform.detach()
-        if selected_layer_idx == len(layers) - 1:
+        to_transform =  intermediate[0].view(intermediate[0].shape[0], -1)
+        if intermediate[1] == self.layers - 1:
             mean = to_transform 
         else:
-            mean = self.linears[current_layer_name](to_transform)
+            mean = self.linears[intermediate[2]](to_transform)
         return self.loss_fn(mean, target) 
 
 
@@ -103,6 +97,12 @@ class DartsLikeTrainer:
         self.aux = aux 
         self.MI_Y_LAMBDA = MI_Y_lambda
         self.layer_wise = layer_wise
+        ## NEW freeze
+        if layer_wise:
+            for n, param in self.graph_model.named_parameters():
+                if n !='gammas':
+                    param.requires_grad = False
+        
         
 
     def train_loop(self, traindata,  valdata, testdata, sample_mod, epoch_num, lr, lr2, device, wd, intermediate_getter = None):
@@ -124,19 +124,18 @@ class DartsLikeTrainer:
             raise NotImplementedError("unrolled")
 
         history = []
-        acc = Accuracy(task='multiclass', num_classes=2, top_k=1).to(device)  # TODO: increase num classes if necessary
+        acc = Accuracy(task='multiclass', num_classes=2)  # TODO: increase num classes if necessary 
+
         if self.parameter_optimization == 'CE':
             crit = CELoss(self.aux, self.layer_wise)
         elif self.parameter_optimization == 'MI':
             crit = MILoss(self.aux, self.MI_Y_LAMBDA, layer_wise=self.layer_wise)
         else:
-            raise NotImplementedError(
-                f"parameter optimization: {self.parameter_optimization}")
+            raise NotImplementedError(f"parameter optimization: {self.parameter_optimization}")
 
         if self.gamma_optimization  == 'CE':
             criterion2 = torch.nn.CrossEntropyLoss()
             crit2 = lambda out, int, targ: criterion2(out, targ)
-
         elif self.gamma_optimization == 'MI':
             crit2 = MILoss(self.aux, self.MI_Y_LAMBDA, layer_wise=self.layer_wise)
         else:
@@ -148,6 +147,13 @@ class DartsLikeTrainer:
         for e in range(epoch_num):
             losses = []
             tq = tqdm.tqdm_notebook(zip(traindata, valdata))
+            
+            if self.layer_wise:
+                selected_layer_idx = np.random.randint(len(list(self.aux.layer_names)))
+                current_layer_name = self.aux.layer_names[selected_layer_idx]
+                parameters[selected_layer_idx].requires_grad = True
+                optim = torch.optim.SGD(parameters, lr = lr, momentum=0.9,weight_decay=5e-4)
+    
             for (x, y), (x2,y2) in tq:
                 optim.zero_grad()
                 x = x.to(device)
@@ -160,6 +166,9 @@ class DartsLikeTrainer:
                         intermediate = self.graph_model.intermediate
                 else:
                     out, intermediate = intermediate_getter(x)
+                
+                if self.layer_wise:
+                    intermediate = [intermediate[current_layer_name], selected_layer_idx, current_layer_name]
 
                 loss = crit(out, intermediate, y)
                 loss.backward()
@@ -201,4 +210,8 @@ class DartsLikeTrainer:
                     history.append(accuracy)
                     acc.reset()
                     self.graph_model.train()
+            
+            if self.layer_wise:
+                parameters[selected_layer_idx].requires_grad = False
+
         return history
