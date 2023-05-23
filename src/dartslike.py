@@ -148,7 +148,7 @@ class DartsLikeTrainer:
             losses = []
             tq = tqdm.tqdm_notebook(zip(traindata, valdata))
             
-            if self.layer_wise:
+            if self.layer_wise and self.parameter_optimization == 'CE':
                 selected_layer_idx = np.random.randint(len(list(self.aux.layer_names)))
                 current_layer_name = self.aux.layer_names[selected_layer_idx]
                 parameters[selected_layer_idx].requires_grad = True
@@ -167,7 +167,7 @@ class DartsLikeTrainer:
                 else:
                     out, intermediate = intermediate_getter(x)
                 
-                if self.layer_wise:
+                if self.layer_wise and self.parameter_optimization == 'CE':
                     intermediate = [intermediate[current_layer_name], selected_layer_idx, current_layer_name]
 
                 loss = crit(out, intermediate, y)
@@ -211,7 +211,7 @@ class DartsLikeTrainer:
                     acc.reset()
                     self.graph_model.train()
             
-            if self.layer_wise:
+            if self.layer_wise and self.parameter_optimization == 'CE':
                 parameters[selected_layer_idx].requires_grad = False
 
         return history
