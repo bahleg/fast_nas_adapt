@@ -188,7 +188,7 @@ class DartsLikeTrainer:
                 optim.step()
                 losses.append(loss.cpu().detach().numpy())
                 tq.set_description(f'epoch: {e}. Loss: {str(np.mean(losses))}. Avg gamma: {str(torch.mean(abs(gammas[0])).item())}')
-                """
+                
                 x2 = x2.to(device)
                 y2 = y2.to(device)
                 optim2.zero_grad()
@@ -204,7 +204,6 @@ class DartsLikeTrainer:
                 loss2 = crit2(out, intermediate, y2)
                 loss2.backward()
                 optim2.step()
-                """
                 batch_seen += 1
                 if batch_seen % sample_mod == 0:
                     self.graph_model.eval()
