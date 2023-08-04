@@ -68,22 +68,50 @@ class MILoss(torch.nn.Module):
         return loss 
 
 class CELoss(torch.nn.Module):
-    def __init__(self, aux: object, layer_wise: bool = False) -> None:
+    def __init__(self, model, aux, layer_wise: bool = False) -> None:
         super().__init__()
-        self.layers = len(list(aux.layer_names))
+        self.model = model 
+        self.layer_id = None 
+        self.mdls = dict(self.model.named_modules())
         self.layer_wise = layer_wise
+        self.aux = aux 
         self.loss_fn = torch.nn.CrossEntropyLoss()
-        if self.layer_wise:
-            self.linears = deepcopy(aux.means_y)
-    
+        self.opt_cnt = 0
+
+    def select_layer(self):
+        self.opt_cnt += 1
+        #for p in self.model.parameters():
+        #    p.requires_grad_(False)
+        
+        for m in self.aux.means_y.values():
+            m.requires_grad_(False)
+
+        for m in self.mdls.values():
+            m.requires_grad_(False)
+        
+        for g in self.model.gammas:
+            g.requires_grad_(True)
+        if self.opt_cnt % 2== 0:
+          self.layer_id = list(self.model.real2proper_label.keys())[-1]
+        else:
+          self.layer_id = np.random.choice(list(self.model.real2proper_label.keys()))
+        #self.layer_id = list(self.model.real2proper_label.keys())[-1]
+        #print (self.layer_id)
+        self.mdls[self.layer_id].requires_grad_(True)
+        self.aux.means_y[self.model.real2proper_label[self.layer_id]].requires_grad_(True)
+       
+
     def forward(self, out, intermediate, target):
         if not self.layer_wise:
             return self.loss_fn(out, target)
-        to_transform =  intermediate[0].view(intermediate[0].shape[0], -1)
-        if intermediate[1] == self.layers - 1:
+        
+        required_intermediate = intermediate[self.model.real2proper_label[self.layer_id]]
+        to_transform =  required_intermediate.view(required_intermediate.shape[0], -1)
+        if self.layer_id == list(self.mdls.keys())[-1]:
             mean = to_transform 
         else:
-            mean = self.linears[intermediate[2]](to_transform)
+            mean = self.aux.means_y[self.model.real2proper_label[self.layer_id]](to_transform)
+        
         return self.loss_fn(mean, target) 
 
 
@@ -97,25 +125,15 @@ class DartsLikeTrainer:
         self.aux = aux 
         self.MI_Y_LAMBDA = MI_Y_lambda
         self.layer_wise = layer_wise
-        ## NEW freeze
-        if layer_wise:
-            for n, param in self.graph_model.named_parameters():
-                if n !='gammas':
-                    param.requires_grad = False
+
         
         
 
-    def train_loop(self, traindata,  valdata, testdata, sample_mod, epoch_num, lr, lr2, device, wd, intermediate_getter = None):
-        if isinstance(self.graph_model.gammas, list):
-            gammas = self.graph_model.gammas[:] 
-            parameters = [p for n, p in self.graph_model.named_parameters() if 'gamma' not in n]
-        else:
-            gammas =  [self.graph_model.gammas]
-            parameters =  [p for n,p in self.graph_model.named_parameters() if n !='gammas']
-        if self.gamma_optimization == 'MI':
-            gammas.extend(list(self.aux.parameters()))
-        if self.parameter_optimization == 'MI':
-            parameters.extend(list(self.aux.parameters()))
+    def train_loop(self, traindata,  valdata, testdata, sample_mod, epoch_num, lr, lr2, device, wd, intermediate_getter = None, class_num=2):
+        gammas =  self.graph_model.gammas
+        parameters =  [p for n,p in self.graph_model.named_parameters() if n !='gammas']
+        gammas.extend(list(self.aux.parameters()))
+        parameters.extend(list(self.aux.parameters()))
         
         if not self.unrolled:
             optim = torch.optim.Adam(parameters, lr=lr)
@@ -124,10 +142,10 @@ class DartsLikeTrainer:
             raise NotImplementedError("unrolled")
 
         history = []
-        acc = Accuracy(task='multiclass', num_classes=2)  # TODO: increase num classes if necessary 
+        acc = Accuracy(task='multiclass', num_classes=class_num).to(device)  # TODO: increase num classes if necessary 
 
         if self.parameter_optimization == 'CE':
-            crit = CELoss(self.aux, self.layer_wise)
+            crit = CELoss(self.graph_model, self.aux, self.layer_wise)
         elif self.parameter_optimization == 'MI':
             crit = MILoss(self.aux, self.MI_Y_LAMBDA, layer_wise=self.layer_wise)
         else:
@@ -147,13 +165,10 @@ class DartsLikeTrainer:
         for e in range(epoch_num):
             losses = []
             tq = tqdm.tqdm_notebook(zip(traindata, valdata))
+            if self.layer_wise:
+              crit.select_layer()
+              optim = torch.optim.Adam(parameters, lr=lr)
             
-            if self.layer_wise and self.parameter_optimization == 'CE':
-                selected_layer_idx = np.random.randint(len(list(self.aux.layer_names)))
-                current_layer_name = self.aux.layer_names[selected_layer_idx]
-                parameters[selected_layer_idx].requires_grad = True
-                optim = torch.optim.SGD(parameters, lr = lr, momentum=0.9,weight_decay=5e-4)
-    
             for (x, y), (x2,y2) in tq:
                 optim.zero_grad()
                 x = x.to(device)
@@ -167,31 +182,29 @@ class DartsLikeTrainer:
                 else:
                     out, intermediate = intermediate_getter(x)
                 
-                if self.layer_wise and self.parameter_optimization == 'CE':
-                    intermediate = [intermediate[current_layer_name], selected_layer_idx, current_layer_name]
-
+               
                 loss = crit(out, intermediate, y)
                 loss.backward()
                 optim.step()
                 losses.append(loss.cpu().detach().numpy())
                 tq.set_description(f'epoch: {e}. Loss: {str(np.mean(losses))}. Avg gamma: {str(torch.mean(abs(gammas[0])).item())}')
-
+                """
                 x2 = x2.to(device)
                 y2 = y2.to(device)
                 optim2.zero_grad()
                 if intermediate_getter is None:
-                    try:
-                        out, intermediate = self.graph_model(x2, intermediate=True)
-                    except:
-                        out = self.graph_model(x)
-                        intermediate = self.graph_model.intermediate
+                    out = self.graph_model(x)
+                    intermediate = self.graph_model.intermediate
                 else:
                     out, intermediate = intermediate_getter(x2)
-                    
+                if not isinstance(out, torch.Tensor):
+                    # when features are also returned in forward
+                    out = out[0]
+
                 loss2 = crit2(out, intermediate, y2)
                 loss2.backward()
                 optim2.step()
-
+                """
                 batch_seen += 1
                 if batch_seen % sample_mod == 0:
                     self.graph_model.eval()
@@ -211,7 +224,5 @@ class DartsLikeTrainer:
                     acc.reset()
                     self.graph_model.train()
             
-            if self.layer_wise and self.parameter_optimization == 'CE':
-                parameters[selected_layer_idx].requires_grad = False
 
         return history
