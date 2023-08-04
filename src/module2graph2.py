@@ -39,9 +39,12 @@ def get_module_by_name(module,
     names = access_string.split(sep='.')
     return reduce(getattr, names, module)
   
-def gamma_hook(module, inp, out, gamma,  intermediate_dict, label):
+def gamma_hook(module, inp, out, gamma,  intermediate_dict, proper2real_label, real2proper_label, label, proper_label):
     result = out * gamma()
-    intermediate_dict[label] = result 
+    intermediate_dict[proper_label] = result 
+    proper2real_label[proper_label] = label 
+    real2proper_label[label] = proper_label
+
     return result 
 
 def make_gamma_hooks(module: torch.nn.Module, graph_module, gamma_constructor: Callable):
@@ -51,14 +54,20 @@ def make_gamma_hooks(module: torch.nn.Module, graph_module, gamma_constructor: C
             nodes.add(node.target)
     module.gammas = []
     module.intermediate = {}
+    module.proper2real_label = {}
+    module.real2proper_label = {}
 
     for node in nodes:
         submodule = get_module_by_name(module, node)
         new_gamma = gamma_constructor()
-        node_propper_name = str(node.replace('.', '_'))
+        node_intermediate_name = str(node)
+        node_propper_name = str(node_intermediate_name.replace('.', '_'))
+        
         submodule.add_module(f'gamma_{node_propper_name}', new_gamma)
         submodule.register_forward_hook(partial(gamma_hook, gamma = new_gamma, intermediate_dict = module.intermediate,
-                                                 label = node_propper_name))
+                                                label = node_intermediate_name, proper2real_label = module.proper2real_label,
+                                                  real2proper_label = module.real2proper_label,
+                                                    proper_label = node_propper_name))
         for param in new_gamma.parameters():
             module.gammas.append(param)
 
