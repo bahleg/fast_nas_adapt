@@ -4,8 +4,6 @@ import torch
 import torch.fx
 from torch.fx.node import Node
 from functools import reduce, partial
-
-import re 
 class Gamma(torch.nn.Module):
     def __init__(self, initial_gamma = 0.0) -> None:
         super().__init__()
@@ -30,6 +28,7 @@ class SigmoidGamma(Gamma):
         else:
             return torch.sigmoid(self.param)
 
+        
 def get_module_by_name(module,
                        access_string: str):
     """Retrieve a module nested in another by its access string.
@@ -48,10 +47,59 @@ def gamma_hook(module, inp, out, gamma,  intermediate_dict, proper2real_label, r
     return result 
 
 def make_gamma_hooks(module: torch.nn.Module, graph_module, gamma_constructor: Callable):
-    nodes = set()
+    node2node = {}
+    for node in graph_module.graph.nodes:
+      for node2 in node.all_input_nodes:
+        if node2 not in node2node:
+          node2node[node2] = []
+        node2node[node2].append(node)
+
+
+    modified = True
+    while modified:
+      modified = False 
+      for node in node2node:
+        to_del = set()
+        for i in range(len(node2node[node])):
+          if node2node[node][i].op != 'call_module':
+            modified = True
+            to_del.add(node2node[node][i])
+            if node2node[node][i] in node2node: # check that not output
+              node2node[node].extend(node2node[node2node[node][i]])
+          for node2 in to_del:
+            node2node[node].remove(node2)
+            
+    to_del = set()
+    to_change = set()
+
+    for node in node2node:
+      if node.op != 'call_module':
+        to_del.add(node)
+      else:
+        to_change.add(node)
+    for node in to_del:
+      del node2node[node]  
+    for node in to_change:
+      new_result = [str(node2.target).replace('.', '_') for node2 in node2node[node]]
+      node2node[str(node.target).replace('.', '_')] = new_result
+      del node2node[node]
     for node in graph_module.graph.nodes:
         if node.op == "call_module":
+            tgt = node.target.replace('.', '_')
+            if (tgt not in node2node) or (len(node2node[tgt]) == 0):
+          
+                print (str(node), 'output')
+                node2node[str(node)] = ['output']
+    module.node2node = node2node
+    
+    nodes = set()
+
+    
+    for node in graph_module.graph.nodes:
+        #print (node.target, node.op)
+        if node.op == "call_module":
             nodes.add(node.target)
+    
     module.gammas = []
     module.intermediate = {}
     module.proper2real_label = {}
@@ -65,56 +113,11 @@ def make_gamma_hooks(module: torch.nn.Module, graph_module, gamma_constructor: C
         
         submodule.add_module(f'gamma_{node_propper_name}', new_gamma)
         submodule.register_forward_hook(partial(gamma_hook, gamma = new_gamma, intermediate_dict = module.intermediate,
-                                                label = node_intermediate_name, proper2real_label = module.proper2real_label,
+                                                label = node_intermediate_name, 
+                                                proper2real_label = module.proper2real_label,
                                                   real2proper_label = module.real2proper_label,
                                                     proper_label = node_propper_name))
         for param in new_gamma.parameters():
             module.gammas.append(param)
 
-
-def make_graph_description(graph_module, operations = None):
-    nonwords = re.compile('[^A-Za-z0-9\s]+')
-    if operations is None:
-        operations = ['call_module']
-
-    e = {}
-    for node in graph_module.graph.nodes:
-        if node.op in operations:
-            #почему-то аргументы идут с нижним подчеркивание вместо точки
-            in_ = nonwords.sub('.', node.name)
-            e[(in_,  node.op)] = []
-            for out_ in list(node.args) + list(node.kwargs):
-                #print (str(out_), nonwords.sub(' ', str(out_)))
-                try:
-                    out_ = nonwords.sub('.', out_.name)
-                except:
-                    out_ = nonwords.sub('.', str(out_))
-               
-                e[(in_,  node.op)].append((out_))
-    return e 
-
-def networkx_plot_graph(graph_module, operations=None):
-    try:
-        import networkx as nx 
-    except:
-        print ('install networkx')
-        return 
-    if operations is None:
-        operations = ['call_module']
-
-    e = make_graph_description(graph_module, operations=operations)
-    color_map = ['b', 'g', 'r']
-    
-    graph = nx.DiGraph()
-    vert_colors = {}
-    for in_ in e:
-        in_, op = in_ 
-        vert_colors[in_] = color_map[operations.index(op)]
-        
-        for out_ in e[(in_, op)]:
-            graph.add_edge(out_, in_)
-    vert_color_list = []
-    for node in graph.nodes:
-        vert_color_list.append(vert_colors.get(node, 'gray'))
-
-    return graph, vert_color_list 
+            
