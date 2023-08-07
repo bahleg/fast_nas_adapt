@@ -8,62 +8,108 @@ from copy import deepcopy
 
 
 class MILoss(torch.nn.Module):
-    def __init__(self, aux, MI_Y_lambda = 0.0, num_classes=2, layer_wise: bool = False) -> None:
+    def __init__(self, aux, model,  MI_Y_lambda = 0.0, num_classes=2, layer_wise: bool = False) -> None:
         super().__init__()
+        self.model = model
         self.aux = aux 
         self.MI_Y_lambda = MI_Y_lambda
         self.num_classes = num_classes
         self.layer_wise = layer_wise  # switch to layer wise optimization
+        self.layer_id = None 
+        self.layer_id2 = None
+        self.mdls = dict(self.model.named_modules())
+        self.opt_cnt = 0
+        
+        
+    def select_layer(self):
+        self.opt_cnt += 1
+        #for p in self.model.parameters():
+        #    p.requires_grad_(False)
+        
+        for m in self.aux.means_y.values():
+            m.requires_grad_(False)
+        for m in self.aux.means_int.values():
+            m.requires_grad_(False)
+        for m in self.aux.lsigmas_int.values():
+            m.requires_grad_(False)
+        for m in self.aux.lsigmas_y.values():
+            m.requires_grad_(False)
+
+        for m in self.mdls.values():
+            m.requires_grad_(False)
+        
+        for g in self.model.gammas:
+            g.requires_grad_(True)
+            
+        
+            
+        if self.opt_cnt % 2== 0:
+          heads = [n for n in self.model.node2node if 'output' in self.model.node2node[n]]
+          assert len(heads)==1
+          self.layer_id = heads[0]
+          self.layer_id2 = 'output'
+        else:
+          self.layer_id = np.random.choice(list(self.model.node2node.keys()))
+          self.layer_id2 = np.random.choice(self.model.node2node[self.layer_id])
+          
+        #self.layer_id = list(self.model.real2proper_label.keys())[-1]
+        #print (self.layer_id)
+        
+        self.mdls[self.model.proper2real_label[self.layer_id]].requires_grad_(True)
+        self.aux.means_y[self.layer_id].requires_grad_(True)
+        self.aux.means_int[self.layer_id+'_____'+self.layer_id2].requires_grad_(True)
+        self.aux.lsigmas_int[self.layer_id+'_____'+self.layer_id2].requires_grad_(True)
+        self.aux.lsigmas_y[self.layer_id].requires_grad_(True)
         
     def forward(self, out, intermediate, target):
-        ### intermediate 
-        layers = list(self.aux.layer_names)
-        loss = 0.0
+        ### intermediate
         if self.layer_wise:
-            selected_layer_ids = [np.random.randint(len(layers))]
+            layers = [self.layer_id]
         else:
-            selected_layer_ids = range(len(layers))
-        for i in range(len(layers)-1):
-            if i not in selected_layer_ids:
-                continue
-            current_layer_name = layers[i]
-            next_layer_name = layers[i+1]
-            to_transform =  intermediate[current_layer_name].view(intermediate[current_layer_name].shape[0], -1)
-            if self.layer_wise:
-                to_transform = to_transform.detach()
-            #print (current_layer_name, next_layer_name,to_transform.shape)
-            #try:
-            #    print (self.aux.means_int.weight.shape)
-            #except:
-            #    print ('low')
-            mean = self.aux.means_int[current_layer_name](to_transform)
-            log_sigma = self.aux.lsigmas_int[current_layer_name]
+            layers = list(self.model.node2node.keys())
+        
+        loss = 0.0
+        target = one_hot(target, self.num_classes)
+        for layer in layers:
+            
+            in_interm = intermediate[layer].view(intermediate[layer].shape[0], -1)
+            
+            
+            if not self.layer_wise:
+                layers2 = self.model.node2node[layer]
+            else:
+                layers2 = [self.layer_id2]
+           
+            for layer2 in layers2:
+                if layer2 == 'output':
+                    target_interm = target
+                else:
+                    target_interm = intermediate[layer2].view(intermediate[layer2].shape[0], -1)
+            
+            target_interm = target_interm.detach()
+            mean = self.aux.means_int[layer + '_____'+ layer2](in_interm)
+            log_sigma = self.aux.lsigmas_int[layer + '_____'+ layer2]
+             
+                          
             loss += (log_sigma * np.prod(mean.shape) + \
-                (((mean - intermediate[next_layer_name].view(intermediate[next_layer_name].shape[0], -1))**2)
+                (((mean - target_interm.view(target_interm.shape[0], -1))**2)
                 / (2 * torch.exp(log_sigma) ** 2))).sum() \
                     * (1.0-self.MI_Y_lambda)
-        
-        target = one_hot(target, self.num_classes)
+                
+
          
         
-        for i in range(len(layers)):
-            if i not in selected_layer_ids:
-                continue
-            current_layer_name = layers[i]
-            to_transform =  intermediate[current_layer_name].view(intermediate[current_layer_name].shape[0], -1)
-            if self.layer_wise and i != len(layers) - 1:
-                to_transform = to_transform.detach()
-            if i == len(layers)-1:
-                mean = to_transform 
-                log_sigma = torch.zeros(1).to(to_transform.device)
+            if 'output' in self.model.node2node[layer]:
+                mean = in_interm 
+                log_sigma = torch.tensor(0.0).to(in_interm.device)
             else:
-                mean = self.aux.means_y[current_layer_name](to_transform)
-                log_sigma = self.aux.lsigmas_y[current_layer_name]
-            log_sigma = log_sigma.detach().view(1)  # detach sigma
-            
-            loss += (log_sigma * mean.numel()).sum()
-            loss += (((mean - target) ** 2).sum() / (2 * torch.exp(log_sigma) ** 2)).sum()
-            loss *= self.MI_Y_lambda
+                mean = self.aux.means_y[layer](in_interm)
+                log_sigma = self.aux.lsigmas_y[layer]
+            #log_sigma = log_sigma.detach().view(1)  # detach sigma
+            loss2 = 0.0
+            loss2 += (log_sigma * mean.numel())
+            loss2 += (((mean - target) ** 2) / (2 * torch.exp(log_sigma) ** 2)).sum()
+            loss += self.MI_Y_lambda * loss2
            
         return loss 
 
@@ -147,7 +193,7 @@ class DartsLikeTrainer:
         if self.parameter_optimization == 'CE':
             crit = CELoss(self.graph_model, self.aux, self.layer_wise)
         elif self.parameter_optimization == 'MI':
-            crit = MILoss(self.aux, self.MI_Y_LAMBDA, layer_wise=self.layer_wise)
+            crit = MILoss(self.aux, self.graph_model, self.MI_Y_LAMBDA, layer_wise=self.layer_wise)
         else:
             raise NotImplementedError(f"parameter optimization: {self.parameter_optimization}")
 
@@ -155,7 +201,7 @@ class DartsLikeTrainer:
             criterion2 = torch.nn.CrossEntropyLoss()
             crit2 = lambda out, int, targ: criterion2(out, targ)
         elif self.gamma_optimization == 'MI':
-            crit2 = MILoss(self.aux, self.MI_Y_LAMBDA, layer_wise=self.layer_wise)
+            crit2 = MILoss(self.aux,  self.graph_model, self.MI_Y_LAMBDA, layer_wise=False)
         else:
             raise NotImplementedError(
                 f"gamma optimization: {self.gamma_optimization}")
@@ -204,6 +250,7 @@ class DartsLikeTrainer:
                 loss2 = crit2(out, intermediate, y2)
                 loss2.backward()
                 optim2.step()
+                
                 batch_seen += 1
                 if batch_seen % sample_mod == 0:
                     self.graph_model.eval()
