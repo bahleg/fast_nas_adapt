@@ -6,7 +6,7 @@ from torchvision import transforms
 from typing import List
 
 
-def get_dataloaders(classes: List[int], batch_size: int = 16, img_size: int = 33, need_val: bool = False, cifar100: bool = False):
+def get_dataloaders(classes: List[int], batch_size: int = 16, img_size: int = 33, need_val: bool = False, cifar100: bool = False, train_limit = None):
     classes_to_ids = {cls : i for i, cls in enumerate(classes)}
     transform_train = transforms.Compose([
         transforms.Resize(img_size),
@@ -31,6 +31,9 @@ def get_dataloaders(classes: List[int], batch_size: int = 16, img_size: int = 33
         _trainset = trainset[:len(trainset)//2]
         valset  = trainset[len(trainset)//2:]
         trainset = _trainset
+    if train_limit:
+        trainset = trainset[:train_limit]
+        
     trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size,
                                               shuffle=True)
     if need_val:

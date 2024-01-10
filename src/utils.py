@@ -4,10 +4,12 @@ import numpy as np
 import torch 
 from torchmetrics import Accuracy
 
-def test_loop(model, testdata, device):
+def test_loop(model, testdata, device, nc=2, return_ll = False):
     device = next(model.parameters()).device
-    acc = Accuracy(task='multiclass', num_classes=2, top_k=1).to(device)  # TODO: adjust num_classes
+    crit = torch.nn.CrossEntropyLoss()
+    acc = Accuracy(task='multiclass', num_classes=nc, top_k=1).to(device)  # TODO: adjust num_classes
     model.eval()
+    loss = 0.0
     for x,y in tqdm.tqdm_notebook(testdata):
         x = x.to(device)
         y = y.to(device)
@@ -16,9 +18,13 @@ def test_loop(model, testdata, device):
             out = out[0] #  when features are also returned in forward
         pred = out.argmax(-1)
         acc(pred, y)
+        if return_ll:
+            loss += crit(out, y).detach().cpu().item()
     accuracy = acc.compute().item()
     
     model.train()
+    if return_ll:
+        return loss
     return accuracy
 
     
